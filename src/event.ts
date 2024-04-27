@@ -27,6 +27,10 @@ export class Event {
       throw Error("Could not verify event");
     }
 
+    if (![0, 1].includes(parsed.kind)) {
+      throw Error("This relay does not support this event kind");
+    }
+
     Object.assign(this, parsed);
   }
 }
