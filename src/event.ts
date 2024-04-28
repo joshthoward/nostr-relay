@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { verifyEvent } from "nostr-tools/pure";
+import { verifyEvent } from "nostr-tools";
 
 export class Event {
   static readonly schema = z.object({
@@ -27,7 +27,7 @@ export class Event {
       throw Error("Could not verify event");
     }
 
-    if (![0, 1].includes(parsed.kind)) {
+    if (![0, 1, 3].includes(parsed.kind)) {
       throw Error("This relay does not support this event kind");
     }
 

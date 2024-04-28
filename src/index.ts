@@ -33,8 +33,21 @@ export class NostrRelay {
           try {
             event = new Event(eventRaw);
           } catch (error) {
+            // TODO: Include error response message
             server.send(JSON.stringify(["OK", eventRaw.id, false, ""]));
             return;
+          }
+
+          // Events of kind 3 are follower lists which overwrite past events
+          if (event.kind === 3) {
+            // TODO(perf): This involves a full table scan and could be improved
+            const previousEvents = await this.state.storage.list<Event>();
+            for (const previousEvent of previousEvents.values()) {
+              if (previousEvent.pubkey === event.pubkey) {
+                await this.state.storage.delete(previousEvent.id);
+                break;
+              }
+            }
           }
 
           await this.state.storage.put(event.id, event);
@@ -70,6 +83,7 @@ export class NostrRelay {
           }
 
 					this.subscriptionMap.set(subscriptionId, filters);
+          // TODO: Make use of max limit from across all filters
 					const events = await this.state.storage.list<Event>({reverse: true, limit: 1000});
 					events.forEach(event => {
             const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);

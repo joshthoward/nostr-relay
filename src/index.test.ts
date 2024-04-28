@@ -2,6 +2,7 @@ import { ClientMessageType, ServerMessageType, ServerErrorPrefixes } from "./typ
 import { WebSocket } from "ws";
 import { describe, expect, it } from "vitest";
 import { exampleEvent } from "./util";
+import { finalizeEvent, generateSecretKey, verifiedSymbol } from "nostr-tools";
 
 const baseUrl = "ws://127.0.0.1:8787"
 
@@ -161,6 +162,43 @@ describe("NostrRelay", () => {
       expect(responses).toEqual([
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.CLOSED, "sub1", ""],
+      ]);  
+    });
+  });
+
+  describe("NIP-02", () => {
+    it("should be able to publish and overwrite following list events", async () => {
+      const followListEventTemplate1 = {
+        "created_at": Math.floor(Date.now() / 1000),
+        "kind": 3,
+        "tags": [
+          ["p", "91cf9128ab25d80e7f3ba0ad9e747fabf5a62b7a42d1517bea237caa59a4e5ca", "wss://alicerelay.com/", "alice"],
+        ],
+        "content": "",
+      }
+
+      const followListEventTemplate2 = structuredClone(followListEventTemplate1);
+      followListEventTemplate2.tags.push(
+        ["p", "14aeb128ab25d80e7f3ba0ad9e747fabf5a62b7a42d1517bea237caa59a8dad4", "wss://bobrelay.com/nostr", "bob"]
+      );
+
+      const sk = generateSecretKey();
+      const followListEvent1 = finalizeEvent(followListEventTemplate1, sk);
+      const followListEvent2 = finalizeEvent(followListEventTemplate2, sk);
+      const {[verifiedSymbol]: _verifiedSymbol, ...result} = followListEvent2;
+
+      const responses = await getWebSocketResponses([
+        [ClientMessageType.EVENT, followListEvent1],
+        [ClientMessageType.EVENT, followListEvent2],
+        [ClientMessageType.REQ, "sub1"],
+        [ClientMessageType.CLOSE, "sub1"],
+      ], 5);
+      expect(responses).toEqual([
+        [ServerMessageType.OK, followListEvent1.id, true, ""],
+        [ServerMessageType.OK, followListEvent2.id, true, ""],
+        [ServerMessageType.EVENT, "sub1", result],
+        [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);  
     });
