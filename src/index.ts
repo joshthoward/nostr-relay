@@ -39,17 +39,21 @@ export class NostrRelay {
 
           // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
           if (event.kind === 0 || event.kind === 3) {
-            const previousEvents = await this.state.storage.list<Event>({ prefix: event.pubkey });
-            for (const previousEvent of previousEvents.values()) {
-              if (previousEvent.kind === event.kind) {
-                await this.state.storage.delete(new Event(previousEvent).index);
-                break;
+            await this.state.storage.transaction(async txn => {
+              const previousEvents = await txn.list<Event>({ prefix: event.pubkey });
+              for (const previousEvent of previousEvents.values()) {
+                if (previousEvent.kind === event.kind) {
+                  await txn.delete(new Event(previousEvent).index);
+                  break;
+                }
               }
-            }
+              await txn.put(event.index, event);
+              server.send(JSON.stringify(["OK", event.id, true, ""]));  
+            });
+          } else {
+            await this.state.storage.put(event.index, event);
+            server.send(JSON.stringify(["OK", event.id, true, ""]));  
           }
-
-          await this.state.storage.put(event.index, event);
-					server.send(JSON.stringify(["OK", event.id, true, ""]));
 
           this.subscriptionMap.forEach((filters, subscriptionId) => {
             const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
