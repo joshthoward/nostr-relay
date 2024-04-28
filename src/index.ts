@@ -1,6 +1,7 @@
 import { ClientMessageType, ServerErrorPrefixes, ServerMessageType } from "./types"; 
 import { Event } from "./event";
 import { Filter } from "./filter";
+import { getRelayInformation } from "./info";
 
 export interface Env {
   NOSTR_RELAY: DurableObjectNamespace;
@@ -154,6 +155,10 @@ export default {
 		if (request.method !== "GET") {
 			return new Response("Expected Method: GET", { status: 400 });
 		}
+
+    if (request.headers?.get("Accept") === "application/nostr+json") {
+      return Response.json(await getRelayInformation(request));
+    }
 
 		if (request.headers.get("Upgrade") !== "websocket") {
 			return new Response("Expected Upgrade: websocket", { status: 426 });

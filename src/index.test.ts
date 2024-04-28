@@ -1,4 +1,4 @@
-import { ClientMessageType, ServerMessageType, ServerErrorPrefixes } from "./types";
+import { ClientMessageType, ServerMessageType, ServerErrorPrefixes, RelayInformation } from "./types";
 import { WebSocket } from "ws";
 import { describe, expect, it } from "vitest";
 import { exampleEvent } from "./util";
@@ -254,7 +254,7 @@ describe("NostrRelay", () => {
   });
 
   describe("NIP-05", () => {
-    it("should be able to publish and overwrite DNS-based internet identifier metadata events",async () => {
+    it("should be able to publish and overwrite DNS-based internet identifier metadata events", async () => {
       const eventTemplate1 = {
         "created_at": Math.floor(Date.now() / 1000),
         "kind": 0,
@@ -283,6 +283,24 @@ describe("NostrRelay", () => {
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
+    });
+  });
+
+  describe("NIP-11", () => {
+    it("should be able to fetch relay information", async () => {
+      const response = await fetch(baseUrl.replace('ws://', 'http://'), {
+        headers: { Accept: 'application/nostr+json' },
+      })
+      const info = await response.json() as RelayInformation;
+      expect(info.name).toEqual("");
+      expect(info.description).toContain("");
+      expect(info.pubkey).toEqual("");
+      expect(info.contact).toEqual("mailto:joshthoward@gmail.com");
+      expect(info.supported_nips).toEqual([1, 2, 5, 11]);
+      expect(info.software).toEqual("https://github.com/joshthoward/nostr-relay");
+      expect(info.version).toEqual("alpha");
+      expect(info.limitations?.auth_required).toEqual(false);
+      expect(info.limitations?.payment_required).toEqual(false);
     });
   });
 });
