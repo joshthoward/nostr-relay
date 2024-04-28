@@ -6,6 +6,21 @@ import { finalizeEvent, generateSecretKey, verifiedSymbol } from "nostr-tools";
 
 const baseUrl = "ws://127.0.0.1:8787"
 
+function generateEvents(length: number) {
+  const sk = generateSecretKey();
+  return Array.from({ length }, (_, i) => {
+    const eventTemplate = {
+      "created_at": i,
+      "kind": 1,
+      "tags": [],
+      "content": `Sample content from message: ${i}`,
+    }
+    const finalizedEvent = finalizeEvent(eventTemplate, sk);
+    const {[verifiedSymbol]: _verifiedSymbol, ...result} = finalizedEvent;
+    return result;
+  });
+}
+
 function waitForWebSocketState(ws: WebSocket, state: any) {
   return new Promise(function (resolve: any) {
     setTimeout(function () {
@@ -164,6 +179,40 @@ describe("NostrRelay", () => {
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);  
+    });
+
+    it("should be able to request a subscription with the default limit of events enforced", async () => {
+      const events = generateEvents(1001);
+      const numResponses = 2003;
+      const responses = await getWebSocketResponses([
+        ...events.map((event) => [ClientMessageType.EVENT, event]),
+        [ClientMessageType.REQ, "sub1"],
+        [ClientMessageType.CLOSE, "sub1"],
+      ], numResponses);
+      expect(responses.length).toEqual(numResponses);
+      expect(responses).toEqual([
+        ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
+        ...events.reverse().slice(0, 1000).map((event) => [ServerMessageType.EVENT, "sub1", event]),
+        [ServerMessageType.EOSE, "sub1"],
+        [ServerMessageType.CLOSED, "sub1", ""],
+      ]);
+    });
+
+    it("should be able to request a subscription with a limit on the number of events", async () => {
+      const events = generateEvents(11);
+      const numResponses = 23;
+      const responses = await getWebSocketResponses([
+        ...events.map((event) => [ClientMessageType.EVENT, event]),
+        [ClientMessageType.REQ, "sub1", { limit: 10 }],
+        [ClientMessageType.CLOSE, "sub1"],
+      ], numResponses);
+      expect(responses.length).toEqual(numResponses);
+      expect(responses).toEqual([
+        ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
+        ...events.reverse().slice(0, 10).map((event) => [ServerMessageType.EVENT, "sub1", event]),
+        [ServerMessageType.EOSE, "sub1"],
+        [ServerMessageType.CLOSED, "sub1", ""],
+      ]);
     });
   });
 

@@ -82,14 +82,24 @@ export class NostrRelay {
           }
 
 					this.subscriptionMap.set(subscriptionId, filters);
-          // TODO: Make use of max limit from across all filters
-					const events = await this.state.storage.list<Event>({reverse: true, limit: 1000});
-					events.forEach(event => {
+          
+          // Take the highest limit requested by a filter or default to 1000 if no limit is provided
+          const limit = filters.reduce(
+            (acc: number | undefined, f: Filter) => f.limit ? Math.max(acc || 0, f.limit) : acc,
+            undefined
+          ) || 1000;
+
+          const events = await this.state.storage.list<Event>();
+					[...events.entries()]
+            .sort((a, b) => b[1].created_at - a[1].created_at)
+            .slice(0, limit)
+            .forEach(([_key, event]) => {
             const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
             if (!isFilteredEvent) {
               server.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
             }
-          });					
+          });
+
 					server.send(JSON.stringify([ServerMessageType.EOSE, subscriptionId]));
 					break;
 				}
