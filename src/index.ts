@@ -51,6 +51,10 @@ export class NostrRelay {
               await txn.put(event.index, event);
               server.send(JSON.stringify(["OK", event.id, true, ""]));  
             });
+          } else if (event.kind === 1059) {
+            // TODO: Store events of kind 1059 and publish only to recipients after supporting NIP-42
+            server.send(JSON.stringify(["OK", event.id, false, "error: this relay does not store events of kind 1059"]));
+            break;
           } else {
             await this.state.storage.put(event.index, event);
             server.send(JSON.stringify(["OK", event.id, true, ""]));  

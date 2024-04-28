@@ -1,10 +1,26 @@
-import { ClientMessageType, ServerMessageType, ServerErrorPrefixes, RelayInformation } from "./types";
+import {
+  ClientMessageType,
+  ServerMessageType,
+  ServerErrorPrefixes,
+  RelayInformation
+} from "./types";
 import { WebSocket } from "ws";
 import { describe, expect, it } from "vitest";
 import { exampleEvent } from "./util";
-import { finalizeEvent, generateSecretKey, verifiedSymbol } from "nostr-tools";
+import { bytesToHex } from "@noble/hashes/utils";
+import {
+  type EventTemplate,
+  type UnsignedEvent,
+  finalizeEvent,
+  generateSecretKey,
+  nip44,
+  nip19,
+  getPublicKey,
+  getEventHash,
+  verifiedSymbol,
+} from "nostr-tools";
 
-const baseUrl = "ws://127.0.0.1:8787"
+const baseUrl = "ws://127.0.0.1:8787";
 
 function generateEvents(length: number) {
   const sk = generateSecretKey();
@@ -296,11 +312,74 @@ describe("NostrRelay", () => {
       expect(info.description).toContain("");
       expect(info.pubkey).toEqual("");
       expect(info.contact).toEqual("mailto:joshthoward@gmail.com");
-      expect(info.supported_nips).toEqual([1, 2, 5, 11]);
+      expect(info.supported_nips).toEqual([1, 2, 5, 11, 59]);
       expect(info.software).toEqual("https://github.com/joshthoward/nostr-relay");
       expect(info.version).toEqual("alpha");
       expect(info.limitations?.auth_required).toEqual(false);
       expect(info.limitations?.payment_required).toEqual(false);
+    });
+  });
+
+  describe("NIP-59", () => {
+    // TODO: Update test once gift wraps are fully supported
+    it("should store seals and reject gift wraps", async () => {
+      const TWO_DAYS = 2 * 24 * 60 * 60
+      const randomNow = () => Math.round(Math.round(Date.now() / 1000) - (Math.random() * TWO_DAYS));
+
+      const nip44ConversationKey = (privateKey: Uint8Array, publicKey: string) =>
+        nip44.v2.utils.getConversationKey(bytesToHex(privateKey), publicKey);
+
+      const nip44Encrypt = (data: EventTemplate, privateKey: Uint8Array, publicKey: string) =>
+        nip44.v2.encrypt(JSON.stringify(data), nip44ConversationKey(privateKey, publicKey));
+
+      const senderPrivateKey = nip19.decode("nsec1p0ht6p3wepe47sjrgesyn4m50m6avk2waqudu9rl324cg2c4ufesyp6rdg").data;
+      const recipientPublicKey = getPublicKey(
+        nip19.decode("nsec1uyyrnx7cgfp40fcskcr2urqnzekc20fj0er6de0q8qvhx34ahazsvs9p36").data);
+      const randomKey = generateSecretKey();
+
+      let rumor: UnsignedEvent & {id?: string}= {
+        created_at: Math.floor(Date.now() / 1000),
+        kind: 1,
+        content: "Are you going to the party tonight?",
+        tags: [],
+        pubkey: getPublicKey(senderPrivateKey),
+      };
+      rumor.id = getEventHash(rumor);
+
+      const seal = finalizeEvent(
+        {
+          kind: 13,
+          content: nip44Encrypt(rumor, senderPrivateKey, recipientPublicKey),
+          created_at: randomNow(),
+          tags: [],
+        },
+        senderPrivateKey
+      );
+      const {[verifiedSymbol]: _verifiedSymbol, ...result} = seal;
+
+      const giftWrap = finalizeEvent(
+        {
+          kind: 1059,
+          content: nip44Encrypt(seal, randomKey, recipientPublicKey),
+          created_at: randomNow(),
+          tags: [["p", recipientPublicKey]],
+        },
+        randomKey
+      );
+
+      const responses = await getWebSocketResponses([
+        [ClientMessageType.EVENT, seal],
+        [ClientMessageType.EVENT, giftWrap],
+        [ClientMessageType.REQ, "sub1"],
+        [ClientMessageType.CLOSE, "sub1"],
+      ], 5);
+      expect(responses).toEqual([
+        [ServerMessageType.OK, seal.id, true, ""],
+        [ServerMessageType.OK, giftWrap.id, false, "error: this relay does not store events of kind 1059"],
+        [ServerMessageType.EVENT, "sub1", result],
+        [ServerMessageType.EOSE, "sub1"],
+        [ServerMessageType.CLOSED, "sub1", ""],
+      ]);  
     });
   });
 });
