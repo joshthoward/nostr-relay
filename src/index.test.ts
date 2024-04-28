@@ -200,7 +200,40 @@ describe("NostrRelay", () => {
         [ServerMessageType.EVENT, "sub1", result],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", ""],
-      ]);  
+      ]);
+    });
+  });
+
+  describe("NIP-05", () => {
+    it("should be able to publish and overwrite DNS-based internet identifier metadata events",async () => {
+      const eventTemplate1 = {
+        "created_at": Math.floor(Date.now() / 1000),
+        "kind": 0,
+        "tags": [],
+        "content": "{\"name\": \"bob\", \"nip05\": \"bob@example.com\"}",  
+      }
+
+      const eventTemplate2 = structuredClone(eventTemplate1);
+      eventTemplate2.content = "{\"name\": \"alice\", \"nip05\": \"alice@example.com\"}";
+
+      const sk = generateSecretKey();
+      const finalizedEvent1 = finalizeEvent(eventTemplate1, sk);
+      const finalizedEvent2 = finalizeEvent(eventTemplate2, sk);
+      const {[verifiedSymbol]: _verifiedSymbol, ...result} = finalizedEvent2;
+
+      const responses = await getWebSocketResponses([
+        [ClientMessageType.EVENT, finalizedEvent1],
+        [ClientMessageType.EVENT, finalizedEvent2],
+        [ClientMessageType.REQ, "sub1"],
+        [ClientMessageType.CLOSE, "sub1"],
+      ], 5);
+      expect(responses).toEqual([
+        [ServerMessageType.OK, finalizedEvent1.id, true, ""],
+        [ServerMessageType.OK, finalizedEvent2.id, true, ""],
+        [ServerMessageType.EVENT, "sub1", result],
+        [ServerMessageType.EOSE, "sub1"],
+        [ServerMessageType.CLOSED, "sub1", ""],
+      ]);
     });
   });
 });

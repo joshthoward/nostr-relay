@@ -32,14 +32,13 @@ export class NostrRelay {
           let event: Event;
           try {
             event = new Event(eventRaw);
-          } catch (error) {
-            // TODO: Include error response message
-            server.send(JSON.stringify(["OK", eventRaw.id, false, ""]));
+          } catch (error: any) {
+            server.send(JSON.stringify(["OK", eventRaw.id, false, `invalid: ${error.message}`]));
             return;
           }
 
-          // Events of kind 3 are follower lists which overwrite past events
-          if (event.kind === 3) {
+          // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
+          if (event.kind === 0 || event.kind === 3) {
             // TODO(perf): This involves a full table scan and could be improved
             const previousEvents = await this.state.storage.list<Event>();
             for (const previousEvent of previousEvents.values()) {

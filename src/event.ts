@@ -21,14 +21,19 @@ export class Event {
 	sig!: string;
 
   constructor(obj: Partial<Event>) {
-    const parsed = Event.schema.parse(obj);
+    let parsed;
+    try {
+      parsed = Event.schema.parse(obj);
+    } catch (error) {
+      throw Error("event could not be parsed");
+    }
 
     if (!verifyEvent(parsed)) {
-      throw Error("Could not verify event");
+      throw Error("event could not be verified");
     }
 
     if (![0, 1, 3].includes(parsed.kind)) {
-      throw Error("This relay does not support this event kind");
+      throw Error("event kind is unsupported");
     }
 
     Object.assign(this, parsed);
