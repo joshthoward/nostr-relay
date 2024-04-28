@@ -1,6 +1,6 @@
 import { finalizeEvent, generateSecretKey } from "nostr-tools";
 import { Event } from "./event";
-import { exampleEvent } from "./util";
+import { exampleEvent, secondsSinceEpoch } from "./util";
 import { describe, expect, it } from "vitest";
 
 describe("Event", () => {
@@ -9,7 +9,7 @@ describe("Event", () => {
 
     {
       const eventTemplate = {
-        "created_at": Math.floor(Date.now() / 1000),
+        "created_at": secondsSinceEpoch(),
         "kind": 1,
         "tags": [],
         "content": "Hello, world!",
@@ -20,7 +20,7 @@ describe("Event", () => {
 
     {
       const eventTemplate = {
-        "created_at": Math.floor(Date.now() / 1000),
+        "created_at": secondsSinceEpoch(),
         "kind": 0,
         "tags": [],
         "content": "{\"name\": \"bob\", \"nip05\": \"bob@example.com\"}"

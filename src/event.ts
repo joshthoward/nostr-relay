@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { verifyEvent } from "nostr-tools";
+import { secondsSinceEpoch } from "./util";
 
 export class Event {
   static readonly schema = z.object({
@@ -35,7 +36,7 @@ export class Event {
       throw Error("event could not be parsed");
     }
 
-    if (parsed.created_at > Date.now() / 1000) {
+    if (parsed.created_at > secondsSinceEpoch()) {
       throw Error("event cannot be future dated");
     }
 

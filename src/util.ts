@@ -11,3 +11,7 @@ export const exampleEvent = {
   ],
   "sig": "908a15e46fb4d8675bab026fc230a0e3542bfade63da02d542fb78b2a8513fcd0092619a2c8c1221e581946e0191f2af505dfdf8657a414dbca329186f009262"
 };
+
+export function secondsSinceEpoch() {
+  return Math.floor(Date.now() / 1000);
+}

@@ -6,7 +6,7 @@ import {
 } from "./types";
 import { WebSocket } from "ws";
 import { describe, expect, it } from "vitest";
-import { exampleEvent } from "./util";
+import { exampleEvent, secondsSinceEpoch } from "./util";
 import { bytesToHex } from "@noble/hashes/utils";
 import {
   type EventTemplate,
@@ -173,7 +173,7 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription with existing events that do not pass filters", async () => {
       const responses = await getWebSocketResponses([
-        [ClientMessageType.REQ, "sub1", { since: Math.floor(Date.now() / 1000) }],
+        [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ]);
@@ -186,7 +186,7 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription and filter new events", async () => {
       const responses = await getWebSocketResponses([
-        [ClientMessageType.REQ, "sub1", { since: Math.floor(Date.now() / 1000) }],
+        [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ]);
@@ -235,7 +235,7 @@ describe("NostrRelay", () => {
   describe("NIP-02", () => {
     it("should be able to publish and overwrite following list events", async () => {
       const followListEventTemplate1 = {
-        "created_at": Math.floor(Date.now() / 1000),
+        "created_at": secondsSinceEpoch(),
         "kind": 3,
         "tags": [
           ["p", "91cf9128ab25d80e7f3ba0ad9e747fabf5a62b7a42d1517bea237caa59a4e5ca", "wss://alicerelay.com/", "alice"],
@@ -272,7 +272,7 @@ describe("NostrRelay", () => {
   describe("NIP-05", () => {
     it("should be able to publish and overwrite DNS-based internet identifier metadata events", async () => {
       const eventTemplate1 = {
-        "created_at": Math.floor(Date.now() / 1000),
+        "created_at": secondsSinceEpoch(),
         "kind": 0,
         "tags": [],
         "content": "{\"name\": \"bob\", \"nip05\": \"bob@example.com\"}",  
@@ -324,7 +324,7 @@ describe("NostrRelay", () => {
     // TODO: Update test once gift wraps are fully supported
     it("should store seals and reject gift wraps", async () => {
       const TWO_DAYS = 2 * 24 * 60 * 60
-      const randomNow = () => Math.round(Math.round(Date.now() / 1000) - (Math.random() * TWO_DAYS));
+      const randomNow = () => Math.round(secondsSinceEpoch() - (Math.random() * TWO_DAYS));
 
       const nip44ConversationKey = (privateKey: Uint8Array, publicKey: string) =>
         nip44.v2.utils.getConversationKey(bytesToHex(privateKey), publicKey);
@@ -338,7 +338,7 @@ describe("NostrRelay", () => {
       const randomKey = generateSecretKey();
 
       let rumor: UnsignedEvent & {id?: string}= {
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: secondsSinceEpoch(),
         kind: 1,
         content: "Are you going to the party tonight?",
         tags: [],
