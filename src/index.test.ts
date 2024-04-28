@@ -49,42 +49,38 @@ function waitForWebSocketState(ws: WebSocket, state: any) {
   });
 }
 
-async function getWebSocketResponses(requests: any[], numResponses?: number): Promise<any[]>  {
-  if (!numResponses) {
-    numResponses = requests.length;
-  }
-
+async function compareWebSocketResponses(requests: any[], expectedResponses: any[]) {
+  const actualResponses: any[] = [];
   const ws = new WebSocket(baseUrl);
-  await waitForWebSocketState(ws, ws.OPEN);
-
-  let responses: any[] = [];
   ws.addEventListener("message", (event) => {
-      responses.push(JSON.parse(event.data as string));
-      if (responses.length === numResponses) {
+      actualResponses.push(JSON.parse(event.data as string));
+      if (actualResponses.length === expectedResponses.length) {
         ws.close();
       }
   });
-
+  await waitForWebSocketState(ws, ws.OPEN);
   requests.forEach((request) => ws.send(JSON.stringify(request)));
   await waitForWebSocketState(ws, ws.CLOSED);
-  return responses;
+  expect(actualResponses).toEqual(expectedResponses);
 }
 
 describe("NostrRelay", () => {
   
   describe("NIP-01", () => {
     it("should be able to publish well formed events", async () => {
-      const responses = await getWebSocketResponses([[ClientMessageType.EVENT, exampleEvent]]);
-      expect(responses).toEqual([[ServerMessageType.OK ,"4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""]]);
+      await compareWebSocketResponses([
+        [ClientMessageType.EVENT, exampleEvent]
+      ], [
+        [ServerMessageType.OK ,"4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""]
+      ]);
     });
 
     it("should be able to request subscription with existing events", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 4);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.EOSE, "sub1"],
@@ -93,63 +89,59 @@ describe("NostrRelay", () => {
     });
 
     it("should be able to request a subscription and receive a new event", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 4);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.CLOSED, "sub1", ""],
-      ]); 
+      ]);
     });
 
     it("should not be able to request an invalid subscription ID", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex"],
-      ]);
-      expect(responses).toEqual([
-        [ServerMessageType.CLOSED, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex", "invalid: subscription ID is invalid"]
+      ], [
+        [ServerMessageType.CLOSED, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex", "invalid: subscription ID is invalid"],
       ]);
     });
 
     it("should not be able to request duplicate subscriptions", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
-      ]);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", `${ServerErrorPrefixes.DUPLICATE}: sub1 already opened`],
         [ServerMessageType.CLOSED, "sub1", ""],
+
       ]);
     });
 
     it("should be able to request multiple subscriptions", async () => {
-        const responses = await getWebSocketResponses([
-          [ClientMessageType.REQ, "sub1"],
-          [ClientMessageType.REQ, "sub2"],
-          [ClientMessageType.CLOSE, "sub1"],
-          [ClientMessageType.CLOSE, "sub2"],
-        ]);
-        expect(responses).toEqual([
-          [ServerMessageType.EOSE, "sub1"],
-          [ServerMessageType.EOSE, "sub2"],
-          [ServerMessageType.CLOSED, "sub1", ""],
-          [ServerMessageType.CLOSED, "sub2", ""],
-        ]);
+      await compareWebSocketResponses([
+        [ClientMessageType.REQ, "sub1"],
+        [ClientMessageType.REQ, "sub2"],
+        [ClientMessageType.CLOSE, "sub1"],
+        [ClientMessageType.CLOSE, "sub2"],
+      ], [
+        [ServerMessageType.EOSE, "sub1"],
+        [ServerMessageType.EOSE, "sub2"],
+        [ServerMessageType.CLOSED, "sub1", ""],
+        [ServerMessageType.CLOSED, "sub2", ""],
+      ]);
     });
 
     it("should be able to request a subscription with existing events that pass filters", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "sub1", { since: exampleEvent.created_at }, { ids: [exampleEvent.id] }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 4);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
@@ -158,26 +150,24 @@ describe("NostrRelay", () => {
     });
 
     it("should be able to request a subscription and receive new events that pass filters", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "sub1", { since: exampleEvent.created_at }, { ids: [exampleEvent.id] }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 4);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.CLOSED, "sub1", ""],
-      ]);  
+      ]);
     });
 
     it("should be able to request a subscription with existing events that do not pass filters", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
-      ]);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
@@ -185,28 +175,24 @@ describe("NostrRelay", () => {
     });
 
     it("should be able to request a subscription and filter new events", async () => {
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
-      ]);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
-      ]);  
+      ]);
     });
 
     it("should be able to request a subscription with the default limit of events enforced", async () => {
       const events = generateEvents(1001);
-      const numResponses = 2003;
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         ...events.map((event) => [ClientMessageType.EVENT, event]),
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
-      ], numResponses);
-      expect(responses.length).toEqual(numResponses);
-      expect(responses).toEqual([
+      ], [
         ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
         ...events.reverse().slice(0, 1000).map((event) => [ServerMessageType.EVENT, "sub1", event]),
         [ServerMessageType.EOSE, "sub1"],
@@ -216,14 +202,11 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription with a limit on the number of events", async () => {
       const events = generateEvents(11);
-      const numResponses = 23;
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         ...events.map((event) => [ClientMessageType.EVENT, event]),
         [ClientMessageType.REQ, "sub1", { limit: 10 }],
         [ClientMessageType.CLOSE, "sub1"],
-      ], numResponses);
-      expect(responses.length).toEqual(numResponses);
-      expect(responses).toEqual([
+      ], [
         ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
         ...events.reverse().slice(0, 10).map((event) => [ServerMessageType.EVENT, "sub1", event]),
         [ServerMessageType.EOSE, "sub1"],
@@ -253,13 +236,12 @@ describe("NostrRelay", () => {
       const followListEvent2 = finalizeEvent(followListEventTemplate2, sk);
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = followListEvent2;
 
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.EVENT, followListEvent1],
         [ClientMessageType.EVENT, followListEvent2],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 5);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.OK, followListEvent1.id, true, ""],
         [ServerMessageType.OK, followListEvent2.id, true, ""],
         [ServerMessageType.EVENT, "sub1", result],
@@ -286,13 +268,12 @@ describe("NostrRelay", () => {
       const finalizedEvent2 = finalizeEvent(eventTemplate2, sk);
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = finalizedEvent2;
 
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.EVENT, finalizedEvent1],
         [ClientMessageType.EVENT, finalizedEvent2],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 5);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.OK, finalizedEvent1.id, true, ""],
         [ServerMessageType.OK, finalizedEvent2.id, true, ""],
         [ServerMessageType.EVENT, "sub1", result],
@@ -332,7 +313,8 @@ describe("NostrRelay", () => {
       const nip44Encrypt = (data: EventTemplate, privateKey: Uint8Array, publicKey: string) =>
         nip44.v2.encrypt(JSON.stringify(data), nip44ConversationKey(privateKey, publicKey));
 
-      const senderPrivateKey = nip19.decode("nsec1p0ht6p3wepe47sjrgesyn4m50m6avk2waqudu9rl324cg2c4ufesyp6rdg").data;
+      const senderPrivateKey =
+        nip19.decode("nsec1p0ht6p3wepe47sjrgesyn4m50m6avk2waqudu9rl324cg2c4ufesyp6rdg").data;
       const recipientPublicKey = getPublicKey(
         nip19.decode("nsec1uyyrnx7cgfp40fcskcr2urqnzekc20fj0er6de0q8qvhx34ahazsvs9p36").data);
       const randomKey = generateSecretKey();
@@ -367,19 +349,18 @@ describe("NostrRelay", () => {
         randomKey
       );
 
-      const responses = await getWebSocketResponses([
+      await compareWebSocketResponses([
         [ClientMessageType.EVENT, seal],
         [ClientMessageType.EVENT, giftWrap],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
-      ], 5);
-      expect(responses).toEqual([
+      ], [
         [ServerMessageType.OK, seal.id, true, ""],
         [ServerMessageType.OK, giftWrap.id, false, "error: this relay does not store events of kind 1059"],
         [ServerMessageType.EVENT, "sub1", result],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", ""],
-      ]);  
+      ]);
     });
   });
 });
