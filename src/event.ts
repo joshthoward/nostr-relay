@@ -38,4 +38,8 @@ export class Event {
 
     Object.assign(this, parsed);
   }
+
+  get index() {
+    return this.pubkey + "/" + this.id;
+  }
 }

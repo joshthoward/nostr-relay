@@ -1,4 +1,5 @@
 import { Filter } from "./filter";
+import { Event } from "./event";
 import { exampleEvent } from "./util";
 import { describe, expect, it } from "vitest";
 
@@ -53,7 +54,7 @@ describe("Filter", () => {
   });
 
   it("Should be able to filter events", () => {
-    const applyFilter = (f: Partial<Filter>) => new Filter(f).isFilteredEvent(exampleEvent);
+    const applyFilter = (f: Partial<Filter>) => new Filter(f).isFilteredEvent(new Event(exampleEvent));
     expect(applyFilter({})).toEqual(false);
     expect(applyFilter({ ids: ["4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65"] })).toEqual(false);
     expect(applyFilter({ ids: ["4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a66"] })).toEqual(true);

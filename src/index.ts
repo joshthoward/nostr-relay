@@ -39,17 +39,16 @@ export class NostrRelay {
 
           // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
           if (event.kind === 0 || event.kind === 3) {
-            // TODO(perf): This involves a full table scan and could be improved
-            const previousEvents = await this.state.storage.list<Event>();
+            const previousEvents = await this.state.storage.list<Event>({ prefix: event.pubkey });
             for (const previousEvent of previousEvents.values()) {
-              if (previousEvent.pubkey === event.pubkey) {
-                await this.state.storage.delete(previousEvent.id);
+              if (previousEvent.kind === event.kind) {
+                await this.state.storage.delete(new Event(previousEvent).index);
                 break;
               }
             }
           }
 
-          await this.state.storage.put(event.id, event);
+          await this.state.storage.put(event.index, event);
 					server.send(JSON.stringify(["OK", event.id, true, ""]));
 
           this.subscriptionMap.forEach((filters, subscriptionId) => {
@@ -89,6 +88,7 @@ export class NostrRelay {
             undefined
           ) || 1000;
 
+          // TODO(perf): Push down filter on pubkey
           const events = await this.state.storage.list<Event>();
 					[...events.entries()]
             .sort((a, b) => b[1].created_at - a[1].created_at)
@@ -119,6 +119,7 @@ export class NostrRelay {
 		}
 	}
 
+  // TODO: Add WebSocket Hibernation
 	async fetch(_request: Request) {
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
