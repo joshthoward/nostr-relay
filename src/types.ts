@@ -1,4 +1,6 @@
-type SubscriptionId = string;
+import { type Filter } from "./filter";
+
+export type SubscriptionId = string;
 export type Subscription = Map<SubscriptionId, Array<Filter>>;
 
 export enum ClientMessageType {

@@ -1,5 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
-import { ClientMessageType, ServerErrorPrefixes, ServerMessageType, Subscription } from "./types"; 
+import {
+  ClientMessageType,
+  ServerErrorPrefixes,
+  ServerMessageType,
+  Subscription,
+  SubscriptionId,
+} from "./types"; 
 import { Event } from "./event";
 import { Filter } from "./filter";
 import { getRelayInformation } from "./info";
@@ -32,101 +38,19 @@ export class NostrRelay extends DurableObject {
 			switch (messageType) {
 				case ClientMessageType.EVENT: {
 					const [eventRaw] = remainder;
-
-          let event: Event;
-          try {
-            event = new Event(eventRaw);
-          } catch (error: any) {
-            ws.send(JSON.stringify(["OK", eventRaw.id, false, `invalid: ${error.message}`]));
-            return;
-          }
-
-          // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
-          if (event.kind === 0 || event.kind === 3) {
-            await this.ctx.storage.transaction(async txn => {
-              const previousEvents = await txn.list<Event>({ prefix: event.pubkey });
-              for (const previousEvent of previousEvents.values()) {
-                if (previousEvent.kind === event.kind) {
-                  await txn.delete(new Event(previousEvent).index);
-                  break;
-                }
-              }
-              await txn.put(event.index, event);
-              ws.send(JSON.stringify(["OK", event.id, true, ""]));  
-            });
-          } else if (event.kind === 1059) {
-            // TODO: Store events of kind 1059 and publish only to recipients after supporting NIP-42
-            ws.send(JSON.stringify(["OK", event.id, false, "error: this relay does not store events of kind 1059"]));
-            break;
-          } else {
-            await this.ctx.storage.put(event.index, event);
-            ws.send(JSON.stringify(["OK", event.id, true, ""]));  
-          }
-
-          this.sessions.forEach((subscriptions, ws) => {
-            subscriptions.forEach((filters, subscriptionId) => {
-              const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
-              if (!isFilteredEvent) {
-                ws.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
-              }
-            });
-          });
+          await this.publishEvent(ws, eventRaw);
 					break;
 				}
 
 				case ClientMessageType.REQ: {
 					const [subscriptionId, ...filtersRaw] = remainder;
-          if (isInvalidSubscriptionId(subscriptionId)) {
-            ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: subscription ID is invalid`]));
-            return
-          }
-
-          let filters: Filter[];
-          try {
-            filters = filtersRaw.map((filter: Filter) => new Filter(filter));
-          } catch (error) {
-            ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: filters are invalid`]));
-            return;
-          }
-
-          const subscriptions = this.sessions.get(ws);
-          if (subscriptions?.has(subscriptionId)) {
-            ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.DUPLICATE}: ${subscriptionId} already opened`]));
-            return
-          }
-
-					subscriptions?.set(subscriptionId, filters);
-          ws.serializeAttachment(subscriptions);
-
-          // Take the highest limit requested by a filter or default to 1000 if no limit is provided
-          const limit = filters.reduce(
-            (acc: number | undefined, f: Filter) => f.limit ? Math.max(acc || 0, f.limit) : acc,
-            undefined
-          ) || 1000;
-
-          // TODO(perf): Push down filter on pubkey
-          const events = await this.ctx.storage.list<Event>();
-					[...events.entries()]
-            .sort((a, b) => b[1].created_at - a[1].created_at)
-            .slice(0, limit)
-            .forEach(([_key, event]) => {
-            const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
-            if (!isFilteredEvent) {
-              ws.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
-            }
-          });
-
-					ws.send(JSON.stringify([ServerMessageType.EOSE, subscriptionId]));
+          await this.requestSubscription(ws, subscriptionId, filtersRaw)
 					break;
 				}
 
 				case ClientMessageType.CLOSE: {
 					const [subscriptionId] = remainder;
-          const subscriptions = this.sessions.get(ws);
-          if (subscriptions?.delete(subscriptionId)) {
-            ws.serializeAttachment(subscriptions);
-            ws.send(JSON.stringify([ServerMessageType.CLOSED, subscriptionId, ""]));
-          }
+          this.closeSubscription(ws, subscriptionId);
 					break;
 				}
 				default:
@@ -163,6 +87,99 @@ export class NostrRelay extends DurableObject {
     console.error("WebSocket connection has been closed due to an error: ", message);
     this.sessions.delete(ws);
     ws.close();
+  }
+
+  private async publishEvent(ws: WebSocket, eventRaw: Event) {
+    let event: Event;
+    try {
+      event = new Event(eventRaw);
+    } catch (error: any) {
+      ws.send(JSON.stringify(["OK", eventRaw.id, false, `invalid: ${error.message}`]));
+      return;
+    }
+
+    // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
+    if (event.kind === 0 || event.kind === 3) {
+      await this.ctx.storage.transaction(async txn => {
+        const previousEvents = await txn.list<Event>({ prefix: event.pubkey });
+        for (const previousEvent of previousEvents.values()) {
+          if (previousEvent.kind === event.kind) {
+            await txn.delete(new Event(previousEvent).index);
+            break;
+          }
+        }
+        await txn.put(event.index, event);
+        ws.send(JSON.stringify(["OK", event.id, true, ""]));  
+      });
+    } else if (event.kind === 1059) {
+      // TODO: Store events of kind 1059 and publish only to recipients after supporting NIP-42
+      ws.send(JSON.stringify(["OK", event.id, false, "error: this relay does not store events of kind 1059"]));
+      return;
+    } else {
+      await this.ctx.storage.put(event.index, event);
+      ws.send(JSON.stringify(["OK", event.id, true, ""]));  
+    }
+
+    this.sessions.forEach((subscriptions, ws) => {
+      subscriptions.forEach((filters, subscriptionId) => {
+        const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
+        if (!isFilteredEvent) {
+          ws.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
+        }
+      });
+    });
+  }
+
+  private async requestSubscription(ws: WebSocket, subscriptionId: SubscriptionId, filtersRaw: Filter[]) {
+    if (isInvalidSubscriptionId(subscriptionId)) {
+      ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: subscription ID is invalid`]));
+      return
+    }
+
+    let filters: Filter[];
+    try {
+      filters = filtersRaw.map((filter: Filter) => new Filter(filter));
+    } catch (error) {
+      ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: filters are invalid`]));
+      return;
+    }
+
+    const subscriptions = this.sessions.get(ws);
+    if (subscriptions?.has(subscriptionId)) {
+      ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.DUPLICATE}: ${subscriptionId} already opened`]));
+      return
+    }
+
+    subscriptions?.set(subscriptionId, filters);
+    ws.serializeAttachment(subscriptions);
+
+    // Take the highest limit requested by a filter or default to 1000 if no limit is provided
+    const limit = filters.reduce(
+      (acc: number | undefined, f: Filter) => f.limit ? Math.max(acc || 0, f.limit) : acc,
+      undefined
+    ) || 1000;
+
+    // TODO(perf): Push down filter on pubkey
+    const events = await this.ctx.storage.list<Event>();
+    [...events.entries()]
+      .sort((a, b) => b[1].created_at - a[1].created_at)
+      .slice(0, limit)
+      .forEach(([_key, event]) => {
+      const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
+      if (!isFilteredEvent) {
+        ws.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
+      }
+    });
+
+    ws.send(JSON.stringify([ServerMessageType.EOSE, subscriptionId]));
+  }
+
+  private closeSubscription(ws: WebSocket, subscriptionId: SubscriptionId) {
+    const subscriptions = this.sessions.get(ws);
+    if (subscriptions?.delete(subscriptionId)) {
+      ws.serializeAttachment(subscriptions);
+      ws.send(JSON.stringify([ServerMessageType.CLOSED, subscriptionId, ""]));
+    }
   }
 }
 
