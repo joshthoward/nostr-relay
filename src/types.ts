@@ -1,3 +1,6 @@
+type SubscriptionId = string;
+export type Subscription = Map<SubscriptionId, Array<Filter>>;
+
 export enum ClientMessageType {
   EVENT = 'EVENT',
   REQ = 'REQ',

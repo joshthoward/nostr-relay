@@ -53,10 +53,10 @@ async function compareWebSocketResponses(requests: any[], expectedResponses: any
   const actualResponses: any[] = [];
   const ws = new WebSocket(baseUrl);
   ws.addEventListener("message", (event) => {
-      actualResponses.push(JSON.parse(event.data as string));
-      if (actualResponses.length === expectedResponses.length) {
-        ws.close();
-      }
+    actualResponses.push(JSON.parse(event.data as string));
+    if (actualResponses.length === expectedResponses.length) {
+      ws.close();
+    }
   });
   await waitForWebSocketState(ws, ws.OPEN);
   requests.forEach((request) => ws.send(JSON.stringify(request)));

@@ -1,4 +1,5 @@
-import { ClientMessageType, ServerErrorPrefixes, ServerMessageType } from "./types"; 
+import { DurableObject } from "cloudflare:workers";
+import { ClientMessageType, ServerErrorPrefixes, ServerMessageType, Subscription } from "./types"; 
 import { Event } from "./event";
 import { Filter } from "./filter";
 import { getRelayInformation } from "./info";
@@ -11,20 +12,22 @@ function isInvalidSubscriptionId(subscriptionId: string): boolean {
   return subscriptionId.trim().length > 64;
 }
 
-export class NostrRelay {
-	// Store subscriptions associated with each websocket connection
-	subscriptionMap: Map<string, Array<Filter>>;
-	state: DurableObjectState;
+export class NostrRelay extends DurableObject {
+  sessions: Map<WebSocket, Subscription>;
 
-	constructor(state: DurableObjectState, env: Env) {
-		this.subscriptionMap = new Map<string, Array<Filter>>();
-		this.state = state;
+	constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);    
+    this.sessions = new Map();
+    this.ctx.getWebSockets().forEach((ws) => {
+      const subscriptions = ws.deserializeAttachment() ?? new Map();
+      this.sessions.set(ws, subscriptions);
+    });
 	}
 
-	private async handleMessage(server: WebSocket, message: MessageEvent) {
+	private async handleMessage(ws: WebSocket, message: ArrayBuffer | string) {
 		try {
 			// TODO: Handle case when ArrayBuffer is sent
-			const [messageType, ...remainder] = JSON.parse(message.data as string);
+			const [messageType, ...remainder] = JSON.parse(message as string);
 
 			switch (messageType) {
 				case ClientMessageType.EVENT: {
@@ -34,13 +37,13 @@ export class NostrRelay {
           try {
             event = new Event(eventRaw);
           } catch (error: any) {
-            server.send(JSON.stringify(["OK", eventRaw.id, false, `invalid: ${error.message}`]));
+            ws.send(JSON.stringify(["OK", eventRaw.id, false, `invalid: ${error.message}`]));
             return;
           }
 
           // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
           if (event.kind === 0 || event.kind === 3) {
-            await this.state.storage.transaction(async txn => {
+            await this.ctx.storage.transaction(async txn => {
               const previousEvents = await txn.list<Event>({ prefix: event.pubkey });
               for (const previousEvent of previousEvents.values()) {
                 if (previousEvent.kind === event.kind) {
@@ -49,22 +52,24 @@ export class NostrRelay {
                 }
               }
               await txn.put(event.index, event);
-              server.send(JSON.stringify(["OK", event.id, true, ""]));  
+              ws.send(JSON.stringify(["OK", event.id, true, ""]));  
             });
           } else if (event.kind === 1059) {
             // TODO: Store events of kind 1059 and publish only to recipients after supporting NIP-42
-            server.send(JSON.stringify(["OK", event.id, false, "error: this relay does not store events of kind 1059"]));
+            ws.send(JSON.stringify(["OK", event.id, false, "error: this relay does not store events of kind 1059"]));
             break;
           } else {
-            await this.state.storage.put(event.index, event);
-            server.send(JSON.stringify(["OK", event.id, true, ""]));  
+            await this.ctx.storage.put(event.index, event);
+            ws.send(JSON.stringify(["OK", event.id, true, ""]));  
           }
 
-          this.subscriptionMap.forEach((filters, subscriptionId) => {
-            const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
-            if (!isFilteredEvent) {
-              server.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
-            }
+          this.sessions.forEach((subscriptions, ws) => {
+            subscriptions.forEach((filters, subscriptionId) => {
+              const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
+              if (!isFilteredEvent) {
+                ws.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
+              }
+            });
           });
 					break;
 				}
@@ -72,7 +77,7 @@ export class NostrRelay {
 				case ClientMessageType.REQ: {
 					const [subscriptionId, ...filtersRaw] = remainder;
           if (isInvalidSubscriptionId(subscriptionId)) {
-            server.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: subscription ID is invalid`]));
+            ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: subscription ID is invalid`]));
             return
           }
 
@@ -80,17 +85,19 @@ export class NostrRelay {
           try {
             filters = filtersRaw.map((filter: Filter) => new Filter(filter));
           } catch (error) {
-            server.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: filters are invalid`]));
+            ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.INVALID}: filters are invalid`]));
             return;
           }
 
-          if (this.subscriptionMap.has(subscriptionId)) {
-            server.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.DUPLICATE}: ${subscriptionId} already opened`]));
+          const subscriptions = this.sessions.get(ws);
+          if (subscriptions?.has(subscriptionId)) {
+            ws.send(JSON.stringify(["CLOSED", subscriptionId, `${ServerErrorPrefixes.DUPLICATE}: ${subscriptionId} already opened`]));
             return
           }
 
-					this.subscriptionMap.set(subscriptionId, filters);
-          
+					subscriptions?.set(subscriptionId, filters);
+          ws.serializeAttachment(subscriptions);
+
           // Take the highest limit requested by a filter or default to 1000 if no limit is provided
           const limit = filters.reduce(
             (acc: number | undefined, f: Filter) => f.limit ? Math.max(acc || 0, f.limit) : acc,
@@ -98,25 +105,27 @@ export class NostrRelay {
           ) || 1000;
 
           // TODO(perf): Push down filter on pubkey
-          const events = await this.state.storage.list<Event>();
+          const events = await this.ctx.storage.list<Event>();
 					[...events.entries()]
             .sort((a, b) => b[1].created_at - a[1].created_at)
             .slice(0, limit)
             .forEach(([_key, event]) => {
             const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
             if (!isFilteredEvent) {
-              server.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
+              ws.send(JSON.stringify([ServerMessageType.EVENT, subscriptionId, event]))
             }
           });
 
-					server.send(JSON.stringify([ServerMessageType.EOSE, subscriptionId]));
+					ws.send(JSON.stringify([ServerMessageType.EOSE, subscriptionId]));
 					break;
 				}
 
 				case ClientMessageType.CLOSE: {
 					const [subscriptionId] = remainder;
-          if (this.subscriptionMap.delete(subscriptionId)) {
-            server.send(JSON.stringify([ServerMessageType.CLOSED, subscriptionId, ""]));
+          const subscriptions = this.sessions.get(ws);
+          if (subscriptions?.delete(subscriptionId)) {
+            ws.serializeAttachment(subscriptions);
+            ws.send(JSON.stringify([ServerMessageType.CLOSED, subscriptionId, ""]));
           }
 					break;
 				}
@@ -128,30 +137,33 @@ export class NostrRelay {
 		}
 	}
 
-  // TODO: Add WebSocket Hibernation
 	async fetch(_request: Request) {
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
 
-		server.accept();
-
-		server.addEventListener("message", (messageEvent) => {
-			console.log("WebSocket received messageEvent: ", messageEvent);
-			this.handleMessage(server, messageEvent);
-		});
-
-		server.addEventListener("close", (closeEvent) => {
-			console.log("WebSocket has been closed: ", closeEvent);
-			server.close()
-		});
-
-		server.addEventListener("error",  (errorEvent) => {
-			console.error("WebSocket has been closed due to an error: ", errorEvent);
-			server.close()
-		});
+		this.ctx.acceptWebSocket(server);
+    this.sessions.set(server, new Map());
 
 		return new Response(null, { status: 101, webSocket: client });
 	}
+
+  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
+    console.log("WebSocket received message: ", message);
+    this.handleMessage(ws, message);
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    console.log(`WebSocket connection has been closed: `, JSON.stringify({ code, reason, wasClean }));
+    this.sessions.delete(ws);
+    ws.close();
+  }
+
+  async webSocketError(ws: WebSocket, error: any) {
+    const message = (error instanceof Error) ? error.message : error;
+    console.error("WebSocket connection has been closed due to an error: ", message);
+    this.sessions.delete(ws);
+    ws.close();
+  }
 }
 
 export default {
