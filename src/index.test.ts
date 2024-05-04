@@ -6,21 +6,20 @@ import {
 } from "./types";
 import { WebSocket } from "ws";
 import { describe, expect, it } from "vitest";
-import { exampleEvent, secondsSinceEpoch } from "./util";
+import { exampleEvent, baseUrl, secondsSinceEpoch } from "./util";
 import { bytesToHex } from "@noble/hashes/utils";
 import {
   type EventTemplate,
   type UnsignedEvent,
   finalizeEvent,
   generateSecretKey,
+  nip42,
   nip44,
   nip19,
   getPublicKey,
   getEventHash,
   verifiedSymbol,
 } from "nostr-tools";
-
-const baseUrl = "ws://127.0.0.1:8787";
 
 function generateEvents(length: number) {
   const sk = generateSecretKey();
@@ -51,7 +50,7 @@ function waitForWebSocketState(ws: WebSocket, state: any) {
 
 async function compareWebSocketResponses(requests: any[], expectedResponses: any[]) {
   const actualResponses: any[] = [];
-  const ws = new WebSocket(baseUrl);
+  const ws = new WebSocket("ws://" + baseUrl);
   ws.addEventListener("message", (event) => {
     actualResponses.push(JSON.parse(event.data as string));
     if (actualResponses.length === expectedResponses.length) {
@@ -65,22 +64,30 @@ async function compareWebSocketResponses(requests: any[], expectedResponses: any
 }
 
 describe("NostrRelay", () => {
-  
+  const challenge = "ca8ee8b814052acec1e876a0f848cd4141d2dc235c2f9ef8e81543958fe435ea2ad9e9eaa43e06b9ced4a30a3e6777b2f64955f4daaf277481197b9927569fe1";
+  const authEvent = finalizeEvent(nip42.makeAuthEvent(baseUrl, challenge), generateSecretKey());
+
   describe("NIP-01", () => {
     it("should be able to publish well formed events", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.EVENT, exampleEvent]
       ], [
-        [ServerMessageType.OK ,"4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""]
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
       ]);
     });
 
     it("should be able to request subscription with existing events", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.EOSE, "sub1"],
@@ -90,10 +97,13 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription and receive a new event", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
@@ -103,18 +113,24 @@ describe("NostrRelay", () => {
 
     it("should not be able to request an invalid subscription ID", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.CLOSED, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex", "invalid: subscription ID is invalid"],
       ]);
     });
 
     it("should not be able to request duplicate subscriptions", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", `${ServerErrorPrefixes.DUPLICATE}: sub1 already opened`],
         [ServerMessageType.CLOSED, "sub1", ""],
@@ -124,11 +140,14 @@ describe("NostrRelay", () => {
 
     it("should be able to request multiple subscriptions", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.REQ, "sub2"],
         [ClientMessageType.CLOSE, "sub1"],
         [ClientMessageType.CLOSE, "sub2"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.EOSE, "sub2"],
         [ServerMessageType.CLOSED, "sub1", ""],
@@ -138,10 +157,13 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription with existing events that pass filters", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1", { since: exampleEvent.created_at }, { ids: [exampleEvent.id] }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
@@ -151,10 +173,13 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription and receive new events that pass filters", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1", { since: exampleEvent.created_at }, { ids: [exampleEvent.id] }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
@@ -164,10 +189,13 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription with existing events that do not pass filters", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
@@ -176,10 +204,13 @@ describe("NostrRelay", () => {
 
     it("should be able to request a subscription and filter new events", async () => {
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }],
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
@@ -189,10 +220,13 @@ describe("NostrRelay", () => {
     it("should be able to request a subscription with the default limit of events enforced", async () => {
       const events = generateEvents(1001);
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         ...events.map((event) => [ClientMessageType.EVENT, event]),
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
         ...events.reverse().slice(0, 1000).map((event) => [ServerMessageType.EVENT, "sub1", event]),
         [ServerMessageType.EOSE, "sub1"],
@@ -203,10 +237,13 @@ describe("NostrRelay", () => {
     it("should be able to request a subscription with a limit on the number of events", async () => {
       const events = generateEvents(11);
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         ...events.map((event) => [ClientMessageType.EVENT, event]),
         [ClientMessageType.REQ, "sub1", { limit: 10 }],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
         ...events.reverse().slice(0, 10).map((event) => [ServerMessageType.EVENT, "sub1", event]),
         [ServerMessageType.EOSE, "sub1"],
@@ -237,11 +274,14 @@ describe("NostrRelay", () => {
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = followListEvent2;
 
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.EVENT, followListEvent1],
         [ClientMessageType.EVENT, followListEvent2],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, followListEvent1.id, true, ""],
         [ServerMessageType.OK, followListEvent2.id, true, ""],
         [ServerMessageType.EVENT, "sub1", result],
@@ -269,11 +309,14 @@ describe("NostrRelay", () => {
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = finalizedEvent2;
 
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.EVENT, finalizedEvent1],
         [ClientMessageType.EVENT, finalizedEvent2],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, finalizedEvent1.id, true, ""],
         [ServerMessageType.OK, finalizedEvent2.id, true, ""],
         [ServerMessageType.EVENT, "sub1", result],
@@ -285,7 +328,7 @@ describe("NostrRelay", () => {
 
   describe("NIP-11", () => {
     it("should be able to fetch relay information", async () => {
-      const response = await fetch(baseUrl.replace('ws://', 'http://'), {
+      const response = await fetch("http://" + baseUrl, {
         headers: { Accept: 'application/nostr+json' },
       })
       const info = await response.json() as RelayInformation;
@@ -293,11 +336,68 @@ describe("NostrRelay", () => {
       expect(info.description).toContain("");
       expect(info.pubkey).toEqual("");
       expect(info.contact).toEqual("mailto:joshthoward@gmail.com");
-      expect(info.supported_nips).toEqual([1, 2, 5, 11, 59]);
+      expect(info.supported_nips).toEqual([1, 2, 5, 11, 42, 59]);
       expect(info.software).toEqual("https://github.com/joshthoward/nostr-relay");
       expect(info.version).toEqual("alpha");
       expect(info.limitations?.auth_required).toEqual(false);
       expect(info.limitations?.payment_required).toEqual(false);
+    });
+  });
+
+  describe("NIP-42", () => {
+    async function expectInvalidAuth(badAuthEventTemplate: EventTemplate) {
+      const badAuthEvent = finalizeEvent(badAuthEventTemplate, generateSecretKey());
+      await compareWebSocketResponses([
+        [ClientMessageType.AUTH, badAuthEvent],
+      ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, badAuthEvent.id, false, "invalid: authentication event is invalid"],
+      ]);
+    }
+
+    it("should reject authentication event with wrong relay", async () => {
+      await expectInvalidAuth({
+        kind: 22242,
+        created_at: secondsSinceEpoch(),
+        tags: [
+          ["relay", "google.com"],
+          ["challenge", challenge],
+        ],
+        content: '',
+      });
+    });
+
+    it("should reject authentication event with wrong challenge", async () => {
+      await expectInvalidAuth({
+        kind: 22242,
+        created_at: secondsSinceEpoch(),
+        tags: [
+          ["relay", baseUrl],
+          ["challenge", "foo"],
+        ],
+        content: '',
+      });
+    });
+
+    it("should reject authentication event with missing tags", async () => {
+      await expectInvalidAuth({
+        kind: 22242,
+        created_at: secondsSinceEpoch(),
+        tags: [],
+        content: '',
+      });
+    });
+
+    it("should reject old authentication event", async () => {
+      await expectInvalidAuth({
+        kind: 22242,
+        created_at: secondsSinceEpoch() - 60 * 11,
+        tags: [
+          ["relay", baseUrl],
+          ["challenge", challenge],
+        ],
+        content: '',
+      });
     });
   });
 
@@ -350,11 +450,14 @@ describe("NostrRelay", () => {
       );
 
       await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.EVENT, seal],
         [ClientMessageType.EVENT, giftWrap],
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, seal.id, true, ""],
         [ServerMessageType.OK, giftWrap.id, false, "error: this relay does not store events of kind 1059"],
         [ServerMessageType.EVENT, "sub1", result],

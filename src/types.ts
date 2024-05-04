@@ -1,15 +1,22 @@
 import { type Filter } from "./filter";
 
 export type SubscriptionId = string;
-export type Subscription = Map<SubscriptionId, Array<Filter>>;
+export type Subscriptions = Map<SubscriptionId, Array<Filter>>;
+export interface Session {
+  challenge: string;
+  pubkey?: string;
+  subscriptions: Subscriptions;
+}
 
 export enum ClientMessageType {
+  AUTH = "AUTH",
   EVENT = 'EVENT',
   REQ = 'REQ',
   CLOSE = 'CLOSE',
 }
   
 export enum ServerMessageType {
+  AUTH = "AUTH",
   EVENT = "EVENT",
   OK = "OK",
   EOSE = "EOSE",
@@ -18,6 +25,7 @@ export enum ServerMessageType {
 }
 
 export enum ServerErrorPrefixes {
+  AUTH_REQUIRED = "auth-required",
   DUPLICATE = "duplicate",
   POW = "pow",
   BLOCKED = "blocked",

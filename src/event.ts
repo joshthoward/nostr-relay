@@ -28,7 +28,6 @@ export class Event {
   //  event that indicates that a client is not upholding the standard of
   //  privacy will be avoided.
   constructor(obj: Partial<Event>) {
-    // TODO: Do not accept future dated events
     let parsed;
     try {
       parsed = Event.schema.parse(obj);
@@ -50,7 +49,7 @@ export class Event {
       throw Error("seals must not have tags");
     }
 
-    if (![0, 1, 3, 13, 1059].includes(parsed.kind)) {
+    if (![0, 1, 3, 13, 1059, 22242].includes(parsed.kind)) {
       throw Error("event kind is unsupported");
     }
 
@@ -59,5 +58,11 @@ export class Event {
 
   get index() {
     return this.pubkey + "/" + this.id;
+  }
+
+  // Return true iff the event was created within the last 10 minutes
+  get isRecent() {
+    const now = secondsSinceEpoch();
+    return this.created_at <= now && this.created_at >= now - 10 * 60;
   }
 }

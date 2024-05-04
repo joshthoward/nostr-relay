@@ -8,7 +8,7 @@ export async function getRelayInformation(request: Request): Promise<RelayInform
     description: "",
     pubkey: "",
     contact: "mailto:joshthoward@gmail.com",
-    supported_nips: [1, 2, 5, 11, 59],
+    supported_nips: [1, 2, 5, 11, 42, 59],
     software: "https://github.com/joshthoward/nostr-relay",
     version: "alpha",
     limitations: {
