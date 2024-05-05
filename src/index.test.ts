@@ -402,8 +402,8 @@ describe("NostrRelay", () => {
   });
 
   describe("NIP-59", () => {
-    // TODO: Update test once gift wraps are fully supported
-    it("should store seals and reject gift wraps", async () => {
+    // TODO: Implement a test to ensure that gift wraps are sent to the desired recipient
+    it("should store seals and gift wraps", async () => {
       const TWO_DAYS = 2 * 24 * 60 * 60
       const randomNow = () => Math.round(secondsSinceEpoch() - (Math.random() * TWO_DAYS));
 
@@ -459,7 +459,7 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, challenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, seal.id, true, ""],
-        [ServerMessageType.OK, giftWrap.id, false, "error: this relay does not store events of kind 1059"],
+        [ServerMessageType.OK, giftWrap.id, true, ""],
         [ServerMessageType.EVENT, "sub1", result],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", ""],

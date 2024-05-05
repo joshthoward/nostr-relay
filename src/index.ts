@@ -20,6 +20,20 @@ function isInvalidSubscriptionId(subscriptionId: string): boolean {
   return subscriptionId.trim().length > 64;
 }
 
+function isIntendedForRecipient(event: Event, pubkey?: string) {
+  if (event.kind !== 1059) {
+    return true;
+  }
+
+  event.tags.forEach(tag => {
+    if (tag[0] === "p" && tag[1] === pubkey) {
+      return true;
+    }
+  });
+
+  return false;
+}
+
 export class NostrRelay extends DurableObject<Env> {
   sessions: Map<WebSocket, Session>;
 
@@ -152,16 +166,16 @@ export class NostrRelay extends DurableObject<Env> {
         await txn.put(event.index, event);
         ws.send(successResponse);  
       });
-    } else if (event.kind === 1059) {
-      // TODO: Store events of kind 1059 and publish only to recipients after supporting NIP-42
-      ws.send(JSON.stringify([ServerMessageType.OK, event.id, false, "error: this relay does not store events of kind 1059"]));
-      return;
     } else {
       await this.ctx.storage.put(event.index, event);
       ws.send(successResponse);  
     }
 
-    this.sessions.forEach(({ subscriptions }, ws) => {
+    this.sessions.forEach(({ pubkey, subscriptions }, ws) => {
+      if (!isIntendedForRecipient(event, pubkey)) {
+        return;
+      }
+
       subscriptions.forEach((filters, subscriptionId) => {
         const isFilteredEvent = filters.reduce((acc: boolean, f: Filter) => acc  || f.isFilteredEvent(event), false);
         if (!isFilteredEvent) {
@@ -216,6 +230,8 @@ export class NostrRelay extends DurableObject<Env> {
     // TODO(perf): Push down filter on pubkey
     const events = await this.ctx.storage.list<Event>();
     [...events.entries()]
+      // Only send gift wrap events to the intended recipient
+      .filter(([_key, event]) => isIntendedForRecipient(event, pubkey))
       .sort((a, b) => b[1].created_at - a[1].created_at)
       .slice(0, limit)
       .forEach(([_key, event]) => {
