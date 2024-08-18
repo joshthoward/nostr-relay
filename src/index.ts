@@ -273,8 +273,16 @@ export default {
 			return new Response("Expected Upgrade: websocket", { status: 426 });
 		}
 
-		const id = env.NOSTR_RELAY.newUniqueId();
-		const stub = env.NOSTR_RELAY.get(id);
-		return stub.fetch(request); 
+    const url = new URL(request.url);
+    const namedRelay = url.searchParams.get("relay");
+    const id = (namedRelay) ? env.NOSTR_RELAY.idFromName(namedRelay) : env.NOSTR_RELAY.newUniqueId();
+
+    try {
+      const stub = env.NOSTR_RELAY.get(id);
+      return stub.fetch(request); 
+    } catch (error) {
+      console.log({message: "Top level try catch caught an error.", error});
+      return new Response("Internal Server Error", { status: 500 });
+    }
 	}
 };

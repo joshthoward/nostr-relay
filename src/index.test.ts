@@ -37,8 +37,8 @@ function generateEvents(length: number) {
 }
 
 function waitForWebSocketState(ws: WebSocket, state: any) {
-  return new Promise(function (resolve: any) {
-    setTimeout(function () {
+  return new Promise((resolve: any) => {
+    setTimeout(() => {
       if (ws.readyState === state) {
         resolve();
       } else {
@@ -48,9 +48,14 @@ function waitForWebSocketState(ws: WebSocket, state: any) {
   });
 }
 
-async function compareWebSocketResponses(requests: any[], expectedResponses: any[]) {
+async function compareWebSocketResponses(requests: any[], expectedResponses: any[], namedRelay?: string) {
+  const url = new URL("ws://" + baseUrl);
+  if (namedRelay !== undefined) {
+    url.searchParams.set("relay", namedRelay);
+  }
+
+  const ws = new WebSocket(url);
   const actualResponses: any[] = [];
-  const ws = new WebSocket("ws://" + baseUrl);
   ws.addEventListener("message", (event) => {
     actualResponses.push(JSON.parse(event.data as string));
     if (actualResponses.length === expectedResponses.length) {
@@ -109,6 +114,21 @@ describe("NostrRelay", () => {
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
+    });
+
+    it("should be able to request a subscription from an existing relay", async () => {
+      await compareWebSocketResponses([
+        [ClientMessageType.AUTH, authEvent],
+        [ClientMessageType.REQ, "sub1", { since: secondsSinceEpoch() }], // Filter out messages from previous test runs
+        [ClientMessageType.EVENT, exampleEvent],
+        [ClientMessageType.CLOSE, "sub1"],
+      ], [
+        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.OK, authEvent.id, true, ""],
+        [ServerMessageType.EOSE, "sub1"],
+        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.CLOSED, "sub1", ""],
+      ], "foo");
     });
 
     it("should not be able to request an invalid subscription ID", async () => {
