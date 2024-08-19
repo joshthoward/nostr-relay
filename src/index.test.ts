@@ -6,7 +6,12 @@ import {
 } from "./types";
 import { WebSocket } from "ws";
 import { describe, expect, it } from "vitest";
-import { exampleEvent, baseUrl, secondsSinceEpoch } from "./util";
+import {
+  exampleEvent,
+  getBaseUrl,
+  secondsSinceEpoch,
+  stagingChallenge
+} from "./util";
 import { bytesToHex } from "@noble/hashes/utils";
 import {
   type EventTemplate,
@@ -20,6 +25,11 @@ import {
   getEventHash,
   verifiedSymbol,
 } from "nostr-tools";
+
+const environment = process.env.ENVIRONMENT;
+const baseUrl = getBaseUrl(environment);
+// The local development environment thinks it is speaking to staging for auth checks
+const authUrl = getBaseUrl((environment === "dev") ? "staging" : environment);
 
 function generateEvents(length: number) {
   const sk = generateSecretKey();
@@ -49,7 +59,8 @@ function waitForWebSocketState(ws: WebSocket, state: any) {
 }
 
 async function compareWebSocketResponses(requests: any[], expectedResponses: any[], namedRelay?: string) {
-  const url = new URL("ws://" + baseUrl);
+  // Use WebSocket over TLS in staging
+  const url = new URL(((process.env.ENVIRONMENT === "staging") ? "wss://" : "ws://") + baseUrl);
   if (namedRelay !== undefined) {
     url.searchParams.set("relay", namedRelay);
   }
@@ -69,8 +80,8 @@ async function compareWebSocketResponses(requests: any[], expectedResponses: any
 }
 
 describe("NostrRelay", () => {
-  const challenge = "ca8ee8b814052acec1e876a0f848cd4141d2dc235c2f9ef8e81543958fe435ea2ad9e9eaa43e06b9ced4a30a3e6777b2f64955f4daaf277481197b9927569fe1";
-  const authEvent = finalizeEvent(nip42.makeAuthEvent(baseUrl, challenge), generateSecretKey());
+  const authEvent = finalizeEvent(nip42.makeAuthEvent(authUrl, stagingChallenge), generateSecretKey());
+  console.log({authEvent, 'tags': authEvent.tags});
 
   describe("NIP-01", () => {
     it("should be able to publish well formed events", async () => {
@@ -78,7 +89,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.EVENT, exampleEvent]
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, exampleEvent.id, true, ""],
       ]);
@@ -91,7 +102,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
@@ -107,7 +118,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
@@ -123,7 +134,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
@@ -136,7 +147,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.AUTH, authEvent],
         [ClientMessageType.REQ, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.CLOSED, "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bcex", "invalid: subscription ID is invalid"],
       ]);
@@ -149,7 +160,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", `${ServerErrorPrefixes.DUPLICATE}: sub1 already opened`],
@@ -166,7 +177,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.CLOSE, "sub1"],
         [ClientMessageType.CLOSE, "sub2"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.EOSE, "sub2"],
@@ -182,7 +193,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
@@ -198,7 +209,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
@@ -214,7 +225,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
@@ -229,7 +240,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.EVENT, exampleEvent],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
@@ -245,7 +256,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
         ...events.reverse().slice(0, 1000).map((event) => [ServerMessageType.EVENT, "sub1", event]),
@@ -262,7 +273,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1", { limit: 10 }],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         ...events.map((event) => [ServerMessageType.OK, event.id, true, ""]),
         ...events.reverse().slice(0, 10).map((event) => [ServerMessageType.EVENT, "sub1", event]),
@@ -300,7 +311,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, followListEvent1.id, true, ""],
         [ServerMessageType.OK, followListEvent2.id, true, ""],
@@ -335,7 +346,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, finalizedEvent1.id, true, ""],
         [ServerMessageType.OK, finalizedEvent2.id, true, ""],
@@ -370,7 +381,7 @@ describe("NostrRelay", () => {
       await compareWebSocketResponses([
         [ClientMessageType.AUTH, badAuthEvent],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, badAuthEvent.id, false, "invalid: authentication event is invalid"],
       ]);
     }
@@ -381,7 +392,7 @@ describe("NostrRelay", () => {
         created_at: secondsSinceEpoch(),
         tags: [
           ["relay", "google.com"],
-          ["challenge", challenge],
+          ["challenge", stagingChallenge],
         ],
         content: '',
       });
@@ -392,7 +403,7 @@ describe("NostrRelay", () => {
         kind: 22242,
         created_at: secondsSinceEpoch(),
         tags: [
-          ["relay", baseUrl],
+          ["relay", authUrl],
           ["challenge", "foo"],
         ],
         content: '',
@@ -413,8 +424,8 @@ describe("NostrRelay", () => {
         kind: 22242,
         created_at: secondsSinceEpoch() - 60 * 11,
         tags: [
-          ["relay", baseUrl],
-          ["challenge", challenge],
+          ["relay", authUrl],
+          ["challenge", stagingChallenge],
         ],
         content: '',
       });
@@ -476,7 +487,7 @@ describe("NostrRelay", () => {
         [ClientMessageType.REQ, "sub1"],
         [ClientMessageType.CLOSE, "sub1"],
       ], [
-        [ServerMessageType.AUTH, challenge],
+        [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.OK, seal.id, true, ""],
         [ServerMessageType.OK, giftWrap.id, true, ""],

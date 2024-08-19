@@ -12,10 +12,23 @@ export const exampleEvent = {
   "sig": "908a15e46fb4d8675bab026fc230a0e3542bfade63da02d542fb78b2a8513fcd0092619a2c8c1221e581946e0191f2af505dfdf8657a414dbca329186f009262"
 };
 
-export const baseUrl = "127.0.0.1:8787";
+export function getBaseUrl(environment?: string) {
+  switch (environment) {
+    case "production":
+      return "nostr-relay.iidblog.workers.dev";
+    case "staging":
+      return "nostr-relay-staging.iidblog.workers.dev";
+    case "dev":
+      return "127.0.0.1:51762";
+    default:
+      throw Error("Invalid environment");
+  }
+}
+
+export const stagingChallenge = "ca8ee8b814052acec1e876a0f848cd4141d2dc235c2f9ef8e81543958fe435ea2ad9e9eaa43e06b9ced4a30a3e6777b2f64955f4daaf277481197b9927569fe1";
 
 export function getChallenge() {
-let buffer = new Uint8Array(64);
+  let buffer = new Uint8Array(64);
   return Array.from(crypto.getRandomValues(buffer))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");

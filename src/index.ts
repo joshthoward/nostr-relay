@@ -9,7 +9,7 @@ import {
 import { Event } from "./event";
 import { Filter } from "./filter";
 import { getRelayInformation } from "./info";
-import { baseUrl, getChallenge } from "./util";
+import { getBaseUrl, getChallenge, stagingChallenge } from "./util";
 
 export interface Env {
   NOSTR_RELAY: DurableObjectNamespace;
@@ -84,10 +84,7 @@ export class NostrRelay extends DurableObject<Env> {
 
 		this.ctx.acceptWebSocket(server);
 
-    const challenge = this.env.ENVIRONMENT === "dev" ? 
-      "ca8ee8b814052acec1e876a0f848cd4141d2dc235c2f9ef8e81543958fe435ea2ad9e9eaa43e06b9ced4a30a3e6777b2f64955f4daaf277481197b9927569fe1" :
-      getChallenge();
-
+    const challenge = this.env.ENVIRONMENT === "staging" ? stagingChallenge : getChallenge();
     this.sessions.set(server, { challenge, subscriptions: new Map() });
     server.send(JSON.stringify([ServerMessageType.AUTH, challenge]));
 
@@ -117,7 +114,7 @@ export class NostrRelay extends DurableObject<Env> {
     try {
       event = new Event(eventRaw);
     } catch (error: any) {
-      ws.send(JSON.stringify([ServerMessageType.OK, eventRaw.id, false, `invalid: ${error.message}`]));
+      ws.send(JSON.stringify([ServerMessageType.OK, eventRaw.id, false, `${ServerErrorPrefixes.INVALID}: ${error.message}`]));
       return;
     }
 
@@ -129,7 +126,8 @@ export class NostrRelay extends DurableObject<Env> {
       let isRelayValid = false;
       let isChallengeValid = false;
       event.tags.forEach(tag => {
-        if (tag[0] === "relay" && tag[1] === baseUrl) {
+        if (tag[0] === "relay" &&
+            tag[1] === getBaseUrl(this.env.ENVIRONMENT)) {
           isRelayValid = true;
         }
         if (tag[0] === "challenge" && tag[1] === session.challenge) {
@@ -275,9 +273,9 @@ export default {
 
     const url = new URL(request.url);
     const namedRelay = url.searchParams.get("relay");
-    const id = (namedRelay) ? env.NOSTR_RELAY.idFromName(namedRelay) : env.NOSTR_RELAY.newUniqueId();
 
     try {
+      const id = (namedRelay) ? env.NOSTR_RELAY.idFromName(namedRelay) : env.NOSTR_RELAY.newUniqueId();
       const stub = env.NOSTR_RELAY.get(id);
       return stub.fetch(request); 
     } catch (error) {
