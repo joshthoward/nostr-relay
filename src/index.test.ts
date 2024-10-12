@@ -31,8 +31,15 @@ const baseUrl = getBaseUrl(environment);
 // The local development environment thinks it is speaking to staging for auth checks
 const authUrl = getBaseUrl((environment === "dev") ? "staging" : environment);
 
+const privateKey = new Uint8Array([
+  173,  26,  66, 210,   7, 199,   4,
+  234,  43,  34, 188, 219, 254, 154,
+  224, 248, 194,  26, 107, 235, 156,
+  113, 175, 120, 118, 221, 106, 167,
+  100,  86, 154, 225
+]);
+
 function generateEvents(length: number) {
-  const sk = generateSecretKey();
   return Array.from({ length }, (_, i) => {
     const eventTemplate = {
       "created_at": i,
@@ -40,7 +47,7 @@ function generateEvents(length: number) {
       "tags": [],
       "content": `Sample content from message: ${i}`,
     }
-    const finalizedEvent = finalizeEvent(eventTemplate, sk);
+    const finalizedEvent = finalizeEvent(eventTemplate, privateKey);
     const {[verifiedSymbol]: _verifiedSymbol, ...result} = finalizedEvent;
     return result;
   });
@@ -80,8 +87,21 @@ async function compareWebSocketResponses(requests: any[], expectedResponses: any
 }
 
 describe("NostrRelay", () => {
-  const authEvent = finalizeEvent(nip42.makeAuthEvent(authUrl, stagingChallenge), generateSecretKey());
-  console.log({authEvent, 'tags': authEvent.tags});
+  const eventTemplate = {
+    "pubkey": getPublicKey(privateKey),
+    "created_at": 1673347337,
+    "kind": 1,
+    "content": "Walled gardens became prisons, and nostr is the first step towards tearing down the prison walls.",
+    "tags": [
+      ["e", "3da979448d9ba263864c4d6f14984c423a3838364ec255f03c7904b1ae77f206"],
+      ["p", "bf2376e17ba4ec269d10fcc996a4746b451152be9031fa48e74553dde5526bce"]
+    ],
+  }
+
+
+  // Remove verifiedSymbol from object to allow for direct comparison
+  const {[verifiedSymbol]: _verifiedSymbol, ...exampleEvent} = finalizeEvent(eventTemplate, privateKey);
+  const authEvent = finalizeEvent(nip42.makeAuthEvent(authUrl, stagingChallenge), privateKey);
 
   describe("NIP-01", () => {
     it("should be able to publish well formed events", async () => {
@@ -104,7 +124,7 @@ describe("NostrRelay", () => {
       ], [
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.EOSE, "sub1"],
         [ServerMessageType.CLOSED, "sub1", ""],
@@ -121,12 +141,13 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
     });
 
+    // TODO: This test occasionally flakes
     it("should be able to request a subscription from an existing relay", async () => {
       await compareWebSocketResponses([
         [ClientMessageType.AUTH, authEvent],
@@ -137,7 +158,7 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
       ], "foo");
     });
@@ -196,7 +217,7 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
@@ -212,7 +233,7 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.EVENT, "sub1", exampleEvent],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
@@ -228,7 +249,7 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
     });
@@ -243,7 +264,7 @@ describe("NostrRelay", () => {
         [ServerMessageType.AUTH, stagingChallenge],
         [ServerMessageType.OK, authEvent.id, true, ""],
         [ServerMessageType.EOSE, "sub1"],
-        [ServerMessageType.OK, "4376c65d2f232afbe9b882a35baa4f6fe8667c4e684749af565f981833ed6a65", true, ""],
+        [ServerMessageType.OK, exampleEvent.id, true, ""],
         [ServerMessageType.CLOSED, "sub1", ""],
       ]);
     });
@@ -299,9 +320,8 @@ describe("NostrRelay", () => {
         ["p", "14aeb128ab25d80e7f3ba0ad9e747fabf5a62b7a42d1517bea237caa59a8dad4", "wss://bobrelay.com/nostr", "bob"]
       );
 
-      const sk = generateSecretKey();
-      const followListEvent1 = finalizeEvent(followListEventTemplate1, sk);
-      const followListEvent2 = finalizeEvent(followListEventTemplate2, sk);
+      const followListEvent1 = finalizeEvent(followListEventTemplate1, privateKey);
+      const followListEvent2 = finalizeEvent(followListEventTemplate2, privateKey);
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = followListEvent2;
 
       await compareWebSocketResponses([
@@ -334,9 +354,8 @@ describe("NostrRelay", () => {
       const eventTemplate2 = structuredClone(eventTemplate1);
       eventTemplate2.content = "{\"name\": \"alice\", \"nip05\": \"alice@example.com\"}";
 
-      const sk = generateSecretKey();
-      const finalizedEvent1 = finalizeEvent(eventTemplate1, sk);
-      const finalizedEvent2 = finalizeEvent(eventTemplate2, sk);
+      const finalizedEvent1 = finalizeEvent(eventTemplate1, privateKey);
+      const finalizedEvent2 = finalizeEvent(eventTemplate2, privateKey);
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = finalizedEvent2;
 
       await compareWebSocketResponses([
@@ -448,36 +467,35 @@ describe("NostrRelay", () => {
         nip19.decode("nsec1p0ht6p3wepe47sjrgesyn4m50m6avk2waqudu9rl324cg2c4ufesyp6rdg").data;
       const recipientPublicKey = getPublicKey(
         nip19.decode("nsec1uyyrnx7cgfp40fcskcr2urqnzekc20fj0er6de0q8qvhx34ahazsvs9p36").data);
-      const randomKey = generateSecretKey();
 
       let rumor: UnsignedEvent & {id?: string}= {
         created_at: secondsSinceEpoch(),
         kind: 1,
         content: "Are you going to the party tonight?",
         tags: [],
-        pubkey: getPublicKey(senderPrivateKey),
+        pubkey: getPublicKey(privateKey),
       };
       rumor.id = getEventHash(rumor);
 
       const seal = finalizeEvent(
         {
           kind: 13,
-          content: nip44Encrypt(rumor, senderPrivateKey, recipientPublicKey),
+          content: nip44Encrypt(rumor, privateKey, recipientPublicKey),
           created_at: randomNow(),
           tags: [],
         },
-        senderPrivateKey
+        privateKey
       );
       const {[verifiedSymbol]: _verifiedSymbol, ...result} = seal;
 
       const giftWrap = finalizeEvent(
         {
           kind: 1059,
-          content: nip44Encrypt(seal, randomKey, recipientPublicKey),
+          content: nip44Encrypt(seal, privateKey, recipientPublicKey),
           created_at: randomNow(),
           tags: [["p", recipientPublicKey]],
         },
-        randomKey
+        privateKey
       );
 
       await compareWebSocketResponses([

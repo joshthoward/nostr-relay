@@ -19,7 +19,7 @@ export function getBaseUrl(environment?: string) {
     case "staging":
       return "nostr-relay-staging.iidblog.workers.dev";
     case "dev":
-      return "127.0.0.1:51762";
+      return "127.0.0.1:8787";
     default:
       throw Error("Invalid environment");
   }

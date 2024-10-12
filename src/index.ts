@@ -144,12 +144,14 @@ export class NostrRelay extends DurableObject<Env> {
       return;
     }
 
-    if (!session.pubkey) {
+    // Authn is handled within the event constructor by verifying that the event is signed by the
+    // private key paired with the provided public key. Authz is handled by this check to ensure
+    // that the event public key matches the public key that has been associated with this
+    // WebSocket session
+    if (!session.pubkey || session.pubkey != event.pubkey) {
       ws.send(JSON.stringify([ServerMessageType.OK, event.id, false, `${ServerErrorPrefixes.AUTH_REQUIRED}: cannot publish events`]));
       return;
     }
-
-    // TODO: Check if session is permitted to publish events.
 
     // Events of kind 0 or 3 are metadata or follower lists respectively which overwrite past events
     if (event.kind === 0 || event.kind === 3) {
@@ -258,7 +260,11 @@ export class NostrRelay extends DurableObject<Env> {
 }
 
 export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	async fetch(request, env, _ctx) {
+    if (env.ENVIRONMENT === "staging") {
+      console.log({request});
+    }
+
 		if (request.method !== "GET") {
 			return new Response("Expected Method: GET", { status: 400 });
 		}
@@ -283,4 +289,4 @@ export default {
       return new Response("Internal Server Error", { status: 500 });
     }
 	}
-};
+} satisfies ExportedHandler<Env>;
